@@ -1,1 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>大直愛情摩天輪｜夜語工作室</title>
+<meta name="description" content="夜語工作室原創線上密室：一間不能相信任何人的密室逃脫工作室。愛情、心機、友情、背叛，54 道全新謎題，七種結局。">
+<style id="sd-hide">body{visibility:hidden}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
 
+<!-- ===== 標題 ===== -->
+<section id="title" class="scr on">
+  <div class="t-art" id="t-art"></div>
+  <div class="t-petals" id="petals" aria-hidden="true"></div>
+  <div class="t-inner">
+    <p class="t-kicker">夜語工作室　原創線上密室</p>
+    <h1 class="t-logo"><span>大直</span><b>愛情摩天輪</b></h1>
+    <p class="t-sub">一場密室逃脫工作室的戀愛戰<br><small>愛情不是解謎，而是一起走進同一個結局。</small></p>
+    <div class="t-btns">
+      <button class="btn gold" id="bNew">推門入局</button>
+      <button class="btn" id="bCont" hidden>繼續上次的進度</button>
+      <button class="btn" id="bFinal" hidden>回到最後一封郵件</button>
+      <button class="btn ghost" id="bGal">結局圖鑑</button>
+      <button class="btn ghost" id="bHow">怎麼玩</button>
+    </div>
+    <p class="t-meta" id="t-meta"></p>
+    <p class="t-who" id="who"></p>
+  </div>
+  <div class="t-cast" id="cast"></div>
+  <button class="t-back" onclick="toLobby()">← 回到夜語工作室大廳</button>
+</section>
+
+<!-- ===== 遊戲 ===== -->
+<section id="game" class="scr">
+  <div id="bg"></div>
+  <div id="stage"></div>
+  <header id="hud">
+    <div class="h-l"><span id="h-ch"></span></div>
+    <div class="h-c"><span class="rank" id="h-rank"></span><span id="h-pz"></span></div>
+    <div class="h-r">
+      <span id="h-time">00:00</span>
+      <button id="hPhone" title="手機" aria-label="手機">📱<i id="badge" hidden></i></button>
+      <button id="hFast" title="快轉" aria-label="快轉">⏩</button>
+      <button id="hSnd" title="音效" aria-label="音效">🔊</button>
+      <button id="hMenu" title="選單" aria-label="選單">☰</button>
+    </div>
+  </header>
+  <div id="box" hidden>
+    <div id="nm" hidden></div>
+    <p id="tx"></p>
+    <span id="more" hidden>▼</span>
+  </div>
+  <div id="choices" hidden></div>
+  <div id="note" hidden></div>
+</section>
+
+<!-- 謎題 -->
+<div id="modal" hidden></div>
+<!-- 手機 -->
+<div id="phone" hidden></div>
+<!-- 一般面板 -->
+<div id="panel" hidden></div>
+
+<!-- ===== 結局 ===== -->
+<section id="end" class="scr">
+  <div class="e-inner">
+    <p class="e-no" id="e-no"></p>
+    <h1 id="e-title"></h1>
+    <div id="e-body"></div>
+    <p class="e-stat" id="e-stat"></p>
+    <div class="t-btns">
+      <button class="btn gold" id="eFinal">回到最後一封郵件，看別的結局</button>
+      <button class="btn" id="eGal">結局圖鑑</button>
+      <button class="btn ghost" id="eTitle">回到標題</button>
+      <button class="btn ghost" onclick="toLobby()">回到大廳</button>
+    </div>
+  </div>
+</section>
+
+<div id="toasts"></div>
+<div id="fx"></div>
+
+<script src="js/audio.js"></script>
+<script src="js/art.js"></script>
+<script src="js/portraits.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/mechanics.js"></script>
+<script src="js/puzzles.js"></script>
+<script src="js/story.js"></script>
+
+<!-- 夜語工作室：沒有註冊 / 沒有角色就送回大廳；記錄遊玩、通關時間、提示、結局 -->
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+const LOBBY = 'https://hao-yuliu.github.io/escape-room/', SLUG = 'love';
+const sb = createClient('https://umlnwzpmjxktfzjvcbts.supabase.co', 'sb_publishable_8J3VI8dijlCccHQbXPfCQQ_v_O0Au3w');
+
+const { data: { session } } = await sb.auth.getSession();
+const user = session?.user ?? null;
+const { data: profile } = user
+  ? await sb.from('profiles').select('username').eq('id', user.id).maybeSingle()
+  : { data: null };
+
+if (!user || !profile) {
+  location.replace(`${LOBBY}?need=player&room=${SLUG}#rooms`);
+} else {
+  const { data: game } = await sb.from('games').select('id').eq('slug', SLUG).maybeSingle();
+  const begin = async () => {
+    if (!game) return null;
+    const { data } = await sb.from('play_records').insert({ user_id: user.id, game_id: game.id }).select('id').single();
+    return data?.id ?? null;
+  };
+  const finish = async (rid, fields) => {
+    if (!game) return;
+    rid = rid || await begin();
+    if (rid) await sb.from('play_records').update({ ...fields, updated_at: new Date().toISOString() }).eq('id', rid);
+  };
+  window.SD = {
+    player: profile,
+    begin,
+    clear: (rid, secs, hints = 0, ending = null) => finish(rid, { status: 'cleared', clear_time_sec: secs, deaths: 0, hints, ending }),
+    ach: (code) => sb.from('user_achievements').upsert({ user_id: user.id, code }, { onConflict: 'user_id,code', ignoreDuplicates: true }),
+  };
+  document.getElementById('who').textContent = `玩家：${profile.username}`;
+  document.getElementById('sd-hide').remove();
+}
+</script>
+</body>
+</html>
