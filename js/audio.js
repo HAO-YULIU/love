@@ -1,7 +1,7 @@
 'use strict';
-// ===== 音效與配樂：全部用 Web Audio 即時合成，不需要外部檔案 =====
+// ===== 音效：Web Audio 即時合成；配樂：audio/bgm.mp3 =====
 const AU = (() => {
-  let ctx = null, master = null, sfxBus = null, bgmBus = null, on = true, mood = null, timer = null, step = 0;
+  let ctx = null, master = null, sfxBus = null, bgmBus = null, on = true;
   try { on = localStorage.getItem('dz_snd') !== '0'; } catch (e) {}
 
   function init() {
@@ -11,7 +11,8 @@ const AU = (() => {
     ctx = new AC();
     master = ctx.createGain(); master.gain.value = on ? 0.9 : 0; master.connect(ctx.destination);
     sfxBus = ctx.createGain(); sfxBus.gain.value = 0.55; sfxBus.connect(master);
-    bgmBus = ctx.createGain(); bgmBus.gain.value = 0.16; bgmBus.connect(master);
+    bgmBus = ctx.createGain(); bgmBus.gain.value = BGM_VOL; bgmBus.connect(master);
+    loadBgm();
   }
   const t0 = () => ctx.currentTime;
 
@@ -59,32 +60,37 @@ const AU = (() => {
     end: () => [60, 64, 67, 71, 74, 79].forEach((n, i) => tone(N(n), 1.8, 'triangle', 0.15, i * 0.18)),
   };
 
-  // ---- 配樂：簡單的步進編曲 ----
-  const SONGS = {
-    title: { bpm: 72, ch: [[57, 60, 64, 67], [53, 57, 60, 64], [55, 59, 62, 67], [52, 55, 59, 64]], arp: 1, lead: [76, 0, 74, 0, 72, 0, 71, 0, 72, 0, 0, 0, 69, 0, 0, 0] },
-    day: { bpm: 92, ch: [[60, 64, 67, 71], [57, 60, 64, 67], [53, 57, 60, 64], [55, 59, 62, 65]], arp: 1, lead: [] },
-    love: { bpm: 68, ch: [[53, 57, 60, 64], [55, 59, 62, 67], [52, 55, 59, 64], [57, 60, 64, 67]], arp: 1, lead: [72, 0, 0, 74, 76, 0, 0, 0, 79, 0, 77, 0, 76, 0, 0, 0] },
-    tense: { bpm: 84, ch: [[57, 60, 64], [58, 62, 65], [57, 60, 64], [56, 59, 64]], arp: 0, pulse: 1, lead: [] },
-    sad: { bpm: 60, ch: [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]], arp: 1, lead: [] },
-    end: { bpm: 66, ch: [[60, 64, 67, 72], [55, 59, 62, 67], [57, 60, 64, 69], [53, 57, 60, 65]], arp: 1, lead: [79, 0, 0, 0, 77, 0, 76, 0, 74, 0, 0, 0, 72, 0, 0, 0] },
-  };
+  // ---- 配樂：audio/bgm.mp3 整場循環播放，音量固定；換場景不切歌、不忽大忽小 ----
+  const BGM_VOL = 0.2, XF = 1.5; // 固定音量（壓在音效底下）、首尾交叉淡入淡出秒數
+  let buf = null, loading = false, nextAt = 0, timer = null;
+  function loadBgm() {
+    if (buf || loading || !ctx) return;
+    loading = true;
+    fetch('audio/bgm.mp3').then(r => r.arrayBuffer())
+      .then(a => new Promise((ok, ng) => ctx.decodeAudioData(a, ok, ng)))
+      .then(b => { buf = b; nextAt = ctx.currentTime + 0.05; tick(); timer = setInterval(tick, 500); })
+      .catch(() => { loading = false; });
+  }
+  // 提前排好下一輪，與上一輪重疊 XF 秒，接縫聽不出來
   function tick() {
-    const s = SONGS[mood]; if (!s || !ctx) return;
-    const bar = Math.floor(step / 16) % s.ch.length, b = step % 16, chord = s.ch[bar], beat = 60 / s.bpm / 4;
-    if (b === 0) { chord.forEach(n => tone(N(n), beat * 15, 'sine', 0.12, 0, bgmBus)); tone(N(chord[0] - 12), beat * 7, 'triangle', 0.35, 0, bgmBus); }
-    if (b === 8) tone(N(chord[0] - 12), beat * 7, 'triangle', 0.28, 0, bgmBus);
-    if (s.arp && b % 2 === 0) tone(N(chord[(b / 2) % chord.length] + 12), beat * 3, 'triangle', 0.1, 0, bgmBus);
-    if (s.pulse && b % 4 === 0) { tone(N(chord[0] - 24), beat * 2, 'sine', 0.4, 0, bgmBus); noise(0.05, 0.05, 0, 8000, 1, 'highpass'); }
-    const L = s.lead[b + (bar % 2) * 0]; if (L && bar % 2 === 1) tone(N(L), beat * 6, 'sine', 0.16, 0, bgmBus);
-    step++;
+    if (!buf || ctx.state !== 'running' || ctx.currentTime < nextAt - 3) return;
+    const t = Math.max(nextAt, ctx.currentTime + 0.05), d = buf.duration;
+    const s = ctx.createBufferSource(), g = ctx.createGain();
+    s.buffer = buf; s.connect(g); g.connect(bgmBus);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(1, t + XF);
+    g.gain.setValueAtTime(1, t + d - XF);
+    g.gain.linearRampToValueAtTime(0.0001, t + d);
+    s.start(t); s.stop(t + d + 0.05);
+    nextAt = t + d - XF;
   }
-  function bgm(m) {
-    if (m === mood) return;
-    mood = m; step = 0; clearInterval(timer); timer = null;
-    if (!m || !SONGS[m]) return;
-    init();
-    timer = setInterval(tick, 60000 / SONGS[m].bpm / 4);
-  }
+  // 切到背景分頁就暫停，回來接著播
+  document.addEventListener('visibilitychange', () => {
+    if (!ctx) return;
+    if (document.hidden) ctx.suspend(); else ctx.resume().then(tick);
+  });
+  // 劇情裡指定的情緒（day / tense…）一律沿用同一首，不中斷
+  function bgm() { if (ctx) loadBgm(); }
   return {
     init,
     sfx(n) { if (!on) return; init(); try { SFX[n]?.(); } catch (e) {} },
