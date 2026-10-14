@@ -98,6 +98,57 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const LOBBY = 'https://hao-yuliu.github.io/escape-room/', SLUG = 'love';
 const sb = createClient('https://umlnwzpmjxktfzjvcbts.supabase.co', 'sb_publishable_8J3VI8dijlCccHQbXPfCQQ_v_O0Au3w');
 
+// ===== 雲端存檔：登入同一個帳號，換裝置也能接著玩 =====
+// 把這個遊戲自己的 localStorage（mine(key) 為真的那些）整包存到 game_saves（每個玩家每款遊戲一筆），帶版本號 v。
+// 進遊戲時：雲端版本比本機新 → 換成雲端的再重新整理一次；本機有新進度 → 上傳。
+// 上傳前確認雲端還是本機接手時的版本；如果別台裝置已經存了更新的進度，這台就不再覆蓋，下次打開時載入新的。
+async function cloudSave(uid, game, mine) {
+  const LS = localStorage, VK = '__cs_' + game, DK = VK + '_dirty', P = Storage.prototype, setRaw = P.setItem, rmRaw = P.removeItem;
+  const snap = () => { const o = {}; for (let i = 0; i < LS.length; i++) { const k = LS.key(i); if (k && mine(k)) o[k] = LS.getItem(k); } return o; };
+  const base = () => +LS.getItem(VK) || 0, dirty = () => LS.getItem(DK) === '1';
+  const fetchRemote = async () => { const { data, error } = await sb.from('game_saves').select('data').eq('user_id', uid).eq('game', game).maybeSingle(); if (error) throw error; return data?.data ?? null; };
+  let timer = null, stale = false, busy = false, paused = false;
+  const push = async () => {
+    clearTimeout(timer); timer = null;
+    if (stale || busy) return; busy = true;
+    try {
+      const r = await fetchRemote();
+      if ((+r?.v || 0) !== base()) { stale = true; return; }   // 別台裝置已經有更新的進度
+      const v = base() + 1;
+      const { error } = await sb.from('game_saves').upsert({ user_id: uid, game, data: { v, keys: snap() }, updated_at: new Date().toISOString() });
+      if (!error) { setRaw.call(LS, VK, String(v)); rmRaw.call(LS, DK); }
+    } catch (e) {} finally { busy = false; }
+  };
+  // 換成雲端的存檔；遊戲已經讀過舊的了，所以重新整理一次（同一個版本只重整一次，避免無限重整）
+  const restore = async (r) => {
+    const rv = +r.v || 0;
+    for (const k of Object.keys(snap())) rmRaw.call(LS, k);
+    for (const [k, v] of Object.entries(r.keys)) setRaw.call(LS, k, v);
+    setRaw.call(LS, VK, String(rv)); rmRaw.call(LS, DK);
+    if (sessionStorage.getItem(VK) !== String(rv)) { sessionStorage.setItem(VK, String(rv)); location.reload(); await new Promise(() => {}); }
+  };
+  let remote = null;
+  try { remote = await fetchRemote(); } catch (e) {}
+  if (remote?.keys && (+remote.v || 0) > base()) await restore(remote);
+  else if (dirty() || (!remote && Object.keys(snap()).length)) {
+    push();
+  }
+  // 本機一有變動就標記，最多每 10 秒上傳一次
+  const touch = (k) => { if (!mine(k)) return; setRaw.call(LS, DK, '1'); if (!timer && !stale && !paused) timer = setTimeout(push, 10000); };
+  P.setItem = function (k, v) { setRaw.call(this, k, v); if (this === LS) touch(String(k)); };
+  P.removeItem = function (k) { rmRaw.call(this, k); if (this === LS) touch(String(k)); };
+  // 切到背景或關掉頁面：立刻上傳，然後暫停（避免放在背景的舊分頁蓋掉別台裝置的新進度）
+  // 回到前景：雲端如果有別台裝置的新進度，就重新整理載入；沒有就繼續同步
+  const flush = () => { if (timer || dirty()) push(); };
+  addEventListener('pagehide', flush);
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'hidden') { paused = true; flush(); return; }
+    paused = false;
+    try { const r = await fetchRemote(); if (r?.keys && (+r.v || 0) > base()) return restore(r); } catch (e) {}
+    if (dirty() && !stale && !timer) timer = setTimeout(push, 10000);
+  });
+}
+
 const { data: { session } } = await sb.auth.getSession();
 const user = session?.user ?? null;
 const { data: profile } = user
@@ -124,6 +175,7 @@ if (!user || !profile) {
     clear: (rid, secs, hints = 0, ending = null) => finish(rid, { status: 'cleared', clear_time_sec: secs, deaths: 0, hints, ending }),
     ach: (code) => sb.from('user_achievements').upsert({ user_id: user.id, code }, { onConflict: 'user_id,code', ignoreDuplicates: true }),
   };
+  await cloudSave(user.id, SLUG, k => k.startsWith('dz_'));
   document.getElementById('who').textContent = `玩家：${profile.username}`;
   document.getElementById('sd-hide').remove();
 }
