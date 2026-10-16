@@ -798,6 +798,13 @@ function toTitle() { playing = false; ADV = null; $('#choices').hidden = true; $
   $('#bFinal').onclick = () => { sfx('click'); replayFinal(); };
   $('#bGal').onclick = () => { AU.init(); sfx('click'); panel('結局圖鑑', galleryHTML()); };
   $('#bHow').onclick = () => { AU.init(); sfx('click'); howTo(); };
+  // 回報問題：附上現在在哪一回、遊戲時間
+  $('#bReport').onclick = () => { sfx('click'); Report.open(); };
+  Report.where = () => {
+    const scr = document.querySelector('.scr.on')?.id;
+    if (!S || !['game', 'end'].includes(scr)) return { at: '標題畫面' };
+    return { at: scr === 'end' ? '結局' : ($('#h-ch').textContent || '遊戲中'), time: fmt(S.t), extra: { solved: Object.keys(S.solved || {}).length, hints: S.hints, wrong: S.wrong } };
+  };
   $('#eFinal').onclick = () => { sfx('click'); replayFinal(); };
   $('#eGal').onclick = () => { sfx('click'); panel('結局圖鑑', galleryHTML()); };
   $('#eTitle').onclick = () => { sfx('click'); toTitle(); };
@@ -808,10 +815,11 @@ function toTitle() { playing = false; ADV = null; $('#choices').hidden = true; $
   sndIcon();
   $('#hMenu').onclick = (e) => {
     e.stopPropagation(); sfx('click');
-    const p = panel('選單', `<div class="menu-list"><button id="mHow">怎麼玩</button><button id="mGal">結局圖鑑</button><button id="mSnd">音效：${AU.on ? '開' : '關'}</button><button id="mTitle">回到標題（進度會保留在這一回的開頭）</button></div>`);
+    const p = panel('選單', `<div class="menu-list"><button id="mHow">怎麼玩</button><button id="mGal">結局圖鑑</button><button id="mSnd">音效：${AU.on ? '開' : '關'}</button><button id="mReport">🐞 回報問題</button><button id="mTitle">回到標題（進度會保留在這一回的開頭）</button></div>`);
     $('#mHow').onclick = howTo;
     $('#mGal').onclick = () => panel('結局圖鑑', galleryHTML());
     $('#mSnd').onclick = () => { AU.toggle(); sndIcon(); $('#mSnd').textContent = `音效：${AU.on ? '開' : '關'}`; };
+    $('#mReport').onclick = () => { p.hidden = true; Report.open(); };
     $('#mTitle').onclick = () => { p.hidden = true; save(); toTitle(); };
   };
   document.addEventListener('pointerdown', () => { AU.init(); if (!AU._t) { AU._t = 1; if ($('#title').classList.contains('on')) AU.bgm('title'); } }, { once: true });
