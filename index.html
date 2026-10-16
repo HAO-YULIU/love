@@ -26,6 +26,7 @@
       <button class="btn" id="bFinal" hidden>回到最後一封郵件</button>
       <button class="btn ghost" id="bGal">結局圖鑑</button>
       <button class="btn ghost" id="bHow">怎麼玩</button>
+      <button class="btn ghost" id="bReport">🐞 回報問題</button>
     </div>
     <p class="t-meta" id="t-meta"></p>
     <p class="t-who" id="who"></p>
@@ -84,6 +85,7 @@
 <div id="toasts"></div>
 <div id="fx"></div>
 
+<script src="js/report.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/art.js"></script>
 <script src="js/portraits.js"></script>
@@ -174,6 +176,8 @@ if (!user || !profile) {
     begin,
     clear: (rid, secs, hints = 0, ending = null) => finish(rid, { status: 'cleared', clear_time_sec: secs, deaths: 0, hints, ending }),
     ach: (code) => sb.from('user_achievements').upsert({ user_id: user.id, code }, { onConflict: 'user_id,code', ignoreDuplicates: true }),
+    // 回報問題（bug_reports 只能新增，管理員才讀得到）
+    report: (row) => sb.from('bug_reports').insert({ game: SLUG, user_id: user.id, ...row }).then(({ error }) => !error, () => false),
   };
   await cloudSave(user.id, SLUG, k => k.startsWith('dz_'));
   document.getElementById('who').textContent = `玩家：${profile.username}`;
